@@ -1,0 +1,30 @@
+{
+  "name": "com.netsync.unity",
+  "version": "2.0.0-rc.1",
+  "displayName": "NetSync for Unity",
+  "description": "Unity adapter for the NetSync networking core: TCP+UDP channels, reliable UDP, optional compression and encryption, LAN discovery. The core is a standalone zero-dependency DLL; this package adds MonoBehaviour integration, main-thread event dispatch and Vector/Quaternion serialization.",
+  "unity": "2021.2",
+  "license": "MIT",
+  "keywords": [
+    "networking",
+    "multiplayer",
+    "tcp",
+    "udp",
+    "netsync"
+  ],
+  "author": {
+    "name": "Vladislav Kresov"
+  },
+  "samples": [
+    {
+      "displayName": "Chat",
+      "description": "Minimal IMGUI chat over the reliable TCP channel, with LAN discovery.",
+      "path": "Samples~/Chat"
+    },
+    {
+      "displayName": "Position Sync",
+      "description": "Server-authoritative transform sync over sequenced UDP (stale snapshots dropped).",
+      "path": "Samples~/PositionSync"
+    }
+  ]
+}

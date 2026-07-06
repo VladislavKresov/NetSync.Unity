@@ -1,0 +1,667 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>NetSync</name>
+    </assembly>
+    <members>
+        <member name="T:NetSync.Diagnostics.INetLogger">
+            <summary>
+            Logging abstraction so the core stays platform-agnostic.
+            Implementations must be thread-safe: transports log from background threads.
+            </summary>
+        </member>
+        <member name="T:NetSync.Diagnostics.NullNetLogger">
+            <summary>Discards everything. Default when no logger is supplied.</summary>
+        </member>
+        <member name="T:NetSync.Diagnostics.ConsoleNetLogger">
+            <summary>Writes to <see cref="T:System.Console"/>. Handy for samples and server apps.</summary>
+        </member>
+        <member name="T:NetSync.Diagnostics.NetMetrics">
+            <summary>
+            Per-connection counters. All writes go through <see cref="T:System.Threading.Interlocked"/> so the
+            metrics can be read from any thread while network threads update them.
+            </summary>
+        </member>
+        <member name="T:NetSync.Discovery.DiscoveryMessage">
+            <summary>
+            LAN discovery datagram: [magic "NSD1":4][serverPort:2 BE][appIdLen:1][appId utf8].
+            The appId keeps unrelated NetSync applications on the same network apart.
+            </summary>
+        </member>
+        <member name="T:NetSync.Discovery.LanServerBroadcaster">
+            <summary>
+            Announces a server on the local network: periodically broadcasts a discovery
+            datagram on every IPv4 LAN interface (Ethernet/Wi-Fi). The Unity-free
+            replacement for the 1.x LocalNetworkBroadcaster.
+            </summary>
+        </member>
+        <member name="F:NetSync.Discovery.LanServerBroadcaster.DefaultDiscoveryPort">
+            <summary>Default UDP port the discovery datagrams are sent to.</summary>
+        </member>
+        <member name="P:NetSync.Discovery.LanServerBroadcaster.TargetOverride">
+            <summary>Test hook: when set, datagrams go only to this endpoint instead of broadcast.</summary>
+        </member>
+        <member name="M:NetSync.Discovery.LanServerBroadcaster.#ctor(System.String,System.Int32,System.Int32,System.Int32,NetSync.Diagnostics.INetLogger)">
+            <param name="appId">Application identity; listeners only react to a matching id.</param>
+            <param name="serverPort">The port clients should connect to.</param>
+            <param name="discoveryPort">UDP port listeners are bound to.</param>
+            <param name="intervalMs">Broadcast period.</param>
+            <param name="logger">Optional logger.</param>
+        </member>
+        <member name="T:NetSync.Discovery.LanServerListener">
+            <summary>
+            Listens for <see cref="T:NetSync.Discovery.LanServerBroadcaster"/> announcements and raises
+            <see cref="E:NetSync.Discovery.LanServerListener.ServerFound"/> with the server's connectable endpoint.
+            The event fires on a background thread and keeps firing for every
+            announcement received — stop the listener once connected.
+            </summary>
+        </member>
+        <member name="P:NetSync.Discovery.LanServerListener.Port">
+            <summary>Actual bound port (useful when constructed with port 0 in tests).</summary>
+        </member>
+        <member name="E:NetSync.Discovery.LanServerListener.ServerFound">
+            <summary>A matching server announced itself at this endpoint.</summary>
+        </member>
+        <member name="T:NetSync.Internal.NetTime">
+            <summary>
+            Monotonic clock. DateTime.UtcNow is not monotonic (NTP jumps, DST issues on some
+            platforms) and must not be used for RTT or timeout measurement.
+            </summary>
+        </member>
+        <member name="P:NetSync.Internal.NetTime.NowMs">
+            <summary>Milliseconds since an arbitrary fixed origin. Monotonic, thread-safe.</summary>
+        </member>
+        <member name="F:NetSync.EventDelivery.Polled">
+            <summary>
+            Events accumulate in a queue and fire inside PollEvents() on the caller's
+            thread. The right choice for game loops (call PollEvents from Update).
+            </summary>
+        </member>
+        <member name="F:NetSync.EventDelivery.Immediate">
+            <summary>
+            Events fire directly on network threads for minimal latency. Handlers must
+            be thread-safe and fast.
+            </summary>
+        </member>
+        <member name="F:NetSync.KeyExchangeMode.None">
+            <summary>No encryption keys; channels with Encryption=true are rejected.</summary>
+        </member>
+        <member name="F:NetSync.KeyExchangeMode.PresharedKey">
+            <summary>
+            Both sides share a secret key out-of-band; per-connection keys are derived
+            from it and the session token. Simple and works everywhere.
+            </summary>
+        </member>
+        <member name="F:NetSync.KeyExchangeMode.Ecdh">
+            <summary>
+            Ephemeral ECDH (P-256) during the handshake: no pre-shared secret needed.
+            Note: the exchange is not authenticated — it protects against passive
+            eavesdropping, not an active man-in-the-middle.
+            </summary>
+        </member>
+        <member name="T:NetSync.EncryptionConfig">
+            <summary>How per-connection encryption keys are established.</summary>
+        </member>
+        <member name="P:NetSync.EncryptionConfig.PresharedKey">
+            <summary>Shared secret for <see cref="F:NetSync.KeyExchangeMode.PresharedKey"/>; 32 bytes recommended, 16 minimum.</summary>
+        </member>
+        <member name="T:NetSync.ChannelConfig">
+            <summary>
+            A logical channel: which transport carries it and with what guarantees.
+            </summary>
+        </member>
+        <member name="P:NetSync.ChannelConfig.Reliability">
+            <summary>
+            Delivery guarantees. Only applies to UDP channels — TCP is inherently
+            reliable-ordered and ignores this setting. Reliable modes also enable
+            automatic fragmentation, lifting the single-datagram size limit.
+            </summary>
+        </member>
+        <member name="P:NetSync.ChannelConfig.Compression">
+            <summary>
+            Deflate-compress payloads on this channel. Small payloads and payloads that
+            do not shrink are sent uncompressed automatically (flagged per packet).
+            </summary>
+        </member>
+        <member name="P:NetSync.ChannelConfig.Encryption">
+            <summary>
+            Encrypt payloads on this channel (AES-256-CBC + HMAC-SHA256, encrypt-then-MAC —
+            the same cipher on every target so netstandard2.1/Unity and net8.0 peers
+            interoperate). Requires <see cref="P:NetSync.NetConfig.Encryption"/> mode ≠ None.
+            </summary>
+        </member>
+        <member name="T:NetSync.NetConfig">
+            <summary>
+            Shared configuration for <see cref="T:NetSync.Peers.NetClient"/> and <see cref="T:NetSync.Peers.NetServer"/>.
+            Client and server must agree on the channel table (same ids, same transports).
+            When <see cref="P:NetSync.NetConfig.Channels"/> is left empty, two defaults are used:
+            channel 0 = TCP, channel 1 = UDP.
+            </summary>
+        </member>
+        <member name="P:NetSync.NetConfig.PingIntervalMs">
+            <summary>Keepalive ping period per transport link.</summary>
+        </member>
+        <member name="P:NetSync.NetConfig.PingTimeoutMs">
+            <summary>Link is considered dead after this long without a pong; 0 disables.</summary>
+        </member>
+        <member name="P:NetSync.NetConfig.ConnectTimeoutMs">
+            <summary>Overall budget for ConnectAsync including the NetSync handshake.</summary>
+        </member>
+        <member name="P:NetSync.NetConfig.Encryption">
+            <summary>Key exchange for channels with Encryption enabled.</summary>
+        </member>
+        <member name="T:NetSync.Peers.ChannelTransform">
+             <summary>
+             Per-channel payload pipeline: compress, then encrypt (compressing ciphertext is
+             pointless). Runs before reliability/fragmentation, which treat the result as
+             opaque bytes. Channels with neither feature skip this entirely — the extra
+             flags byte only exists on channels that opted in.
+            
+             Transformed layout: [flags:1][body]
+             </summary>
+        </member>
+        <member name="F:NetSync.Peers.ChannelTransform.CompressionThreshold">
+            <summary>Payloads smaller than this are never worth deflating.</summary>
+        </member>
+        <member name="M:NetSync.Peers.ChannelTransform.Decode(NetSync.ChannelConfig,NetSync.Pipeline.Security.ConnectionCrypto,System.Byte[],NetSync.Diagnostics.INetLogger)">
+            <summary>Returns null when the packet must be dropped (tampered, malformed, downgraded).</summary>
+        </member>
+        <member name="T:NetSync.Peers.EventDispatcher">
+            <summary>
+            Routes events either straight through (Immediate) or into a queue drained by
+            PollEvents (Polled). Handler exceptions are logged, never propagated into
+            network threads.
+            </summary>
+        </member>
+        <member name="P:NetSync.Peers.EventDispatcher.IsImmediate">
+            <summary>True in Immediate mode: callers can invoke handlers directly and skip
+            the closure allocation that Dispatch would need.</summary>
+        </member>
+        <member name="M:NetSync.Peers.EventDispatcher.Poll(System.Int32)">
+            <summary>Drains queued events on the calling thread. No-op in Immediate mode.</summary>
+        </member>
+        <member name="T:NetSync.Peers.NetClient">
+             <summary>
+             High-level client: connects all configured transports to one server in parallel
+             and exposes them as channels. A random session token sent in the Hello message
+             on every link lets the server group the links into a single logical connection.
+            
+             Threading: with EventDelivery.Polled (default) call <see cref="M:NetSync.Peers.NetClient.PollEvents(System.Int32)"/>
+             regularly; with Immediate, handlers run on network threads.
+             </summary>
+        </member>
+        <member name="P:NetSync.Peers.NetClient.ConnectionId">
+            <summary>Server-assigned connection id, 0 before the handshake completes.</summary>
+        </member>
+        <member name="P:NetSync.Peers.NetClient.PingMs">
+            <summary>Lowest RTT across connected links, -1 when unknown.</summary>
+        </member>
+        <member name="E:NetSync.Peers.NetClient.DataReceived">
+            <summary>Application data: (channel, payload).</summary>
+        </member>
+        <member name="M:NetSync.Peers.NetClient.PollEvents(System.Int32)">
+            <summary>Drains queued events (Polled mode). Returns the number of events handled.</summary>
+        </member>
+        <member name="T:NetSync.Peers.NetConnection">
+            <summary>
+            A connected client as seen by <see cref="T:NetSync.Peers.NetServer"/>: one logical connection
+            spanning one transport link per configured transport type.
+            </summary>
+        </member>
+        <member name="M:NetSync.Peers.NetConnection.GetEndPoint(NetSync.TransportType)">
+            <summary>Endpoint of the link on the given transport, null when not bound.</summary>
+        </member>
+        <member name="M:NetSync.Peers.NetConnection.GetPing(NetSync.TransportType)">
+            <summary>RTT on the given transport link, -1 when unknown.</summary>
+        </member>
+        <member name="P:NetSync.Peers.NetConnection.PingMs">
+            <summary>Lowest RTT across bound links, -1 when unknown.</summary>
+        </member>
+        <member name="M:NetSync.Peers.NetConnection.DisconnectAsync">
+            <summary>Kicks this client: sends Bye on every link, then closes the connection.</summary>
+        </member>
+        <member name="T:NetSync.Peers.NetServer">
+             <summary>
+             High-level server: runs one server transport per transport type used by the
+             channel table, groups links arriving with the same session token into logical
+             <see cref="T:NetSync.Peers.NetConnection"/>s and routes channel data.
+            
+             A connection is announced via <see cref="E:NetSync.Peers.NetServer.ConnectionOpened"/> only once links for
+             ALL configured transports completed the handshake; clients must therefore use
+             the same channel table as the server.
+             </summary>
+        </member>
+        <member name="E:NetSync.Peers.NetServer.DataReceived">
+            <summary>Application data: (connection, channel, payload).</summary>
+        </member>
+        <member name="M:NetSync.Peers.NetServer.StartAsync(System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Starts listening on <paramref name="port"/> for every configured transport.
+            Pass 0 to let the OS pick one port shared by all transports. Returns the bound port.
+            </summary>
+        </member>
+        <member name="M:NetSync.Peers.NetServer.TryEstablishCrypto(NetSync.Peers.NetConnection,System.Byte[],System.Int32,System.Int32)">
+            <summary>Derives per-connection keys on first Hello. Returns false when the Hello is unusable.</summary>
+        </member>
+        <member name="M:NetSync.Peers.NetServer.BroadcastAsync(System.Byte,System.ReadOnlyMemory{System.Byte},System.Threading.CancellationToken)">
+            <summary>Sends to every open connection; individual failures are logged, not thrown.</summary>
+        </member>
+        <member name="M:NetSync.Peers.NetServer.PollEvents(System.Int32)">
+            <summary>Drains queued events (Polled mode). Returns the number of events handled.</summary>
+        </member>
+        <member name="T:NetSync.Peers.PeerProtocol">
+             <summary>
+             Peer-level messages, carried inside transport Data payloads.
+            
+             Hello   [0x01][version:1][sessionToken:8][cipher:1][pubKeyLen:1][pubKey…]
+                      — client introduces itself on every link; the token groups multiple
+                        transport links into one logical connection. The cipher/pubkey tail
+                        is optional (absent = no encryption).
+             Welcome [0x02][connectionId:8][pubKeyLen:1][pubKey…]
+                      — server accepted the link; the pubkey tail is present in ECDH mode.
+             Reject  [0x03][reason:1]                   — server refused.
+             Bye     [0x04][reason:1]                   — graceful disconnect notice.
+             Data    [0x10][channel:1][payload…]        — application data.
+             </summary>
+        </member>
+        <member name="F:NetSync.Peers.PeerProtocol.MsgRelData">
+            <summary>Reliability-layer data: [0x20][flags:1][channel:1][seq:2 BE][payload…]</summary>
+        </member>
+        <member name="F:NetSync.Peers.PeerProtocol.MsgRelAck">
+            <summary>Reliability-layer ack: [0x21][channel:1][anchorSeq:2 BE][mask:4 BE]</summary>
+        </member>
+        <member name="T:NetSync.Pipeline.Compression.Compressor">
+            <summary>
+            Deflate payload compression. Format: [originalLength:4 BE][deflate stream].
+            The explicit length lets the receiver allocate exactly once and enforce a
+            decompression-bomb cap.
+            </summary>
+        </member>
+        <member name="F:NetSync.Pipeline.Compression.Compressor.MaxDecompressedBytes">
+            <summary>Refuse to inflate anything claiming to be larger than this.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Compression.Compressor.Decompress(System.ReadOnlySpan{System.Byte},NetSync.Diagnostics.INetLogger)">
+            <summary>Returns null when the blob is malformed, oversized or truncated.</summary>
+        </member>
+        <member name="T:NetSync.Pipeline.Fragmentation.FragmentBuffer">
+            <summary>
+            Reassembles fragmented packets. Improvements over the 1.x version:
+            fragments live in a flat array instead of a Dictionary, completeness is an O(1)
+            counter check, stale-buffer cleanup is throttled instead of running on every
+            fragment, and total buffered memory is capped.
+            </summary>
+        </member>
+        <member name="P:NetSync.Pipeline.Fragmentation.FragmentBuffer.FragmentTimeoutMs">
+            <summary>Incomplete packets are dropped after this long without new fragments.</summary>
+        </member>
+        <member name="P:NetSync.Pipeline.Fragmentation.FragmentBuffer.MaxConcurrentPackets">
+            <summary>Upper bound on simultaneously reassembling packets; oldest is evicted.</summary>
+        </member>
+        <member name="P:NetSync.Pipeline.Fragmentation.FragmentBuffer.MaxFragmentsPerPacket">
+            <summary>Sanity cap: reject absurd fragment counts (protocol error / attack).</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Fragmentation.FragmentBuffer.AddFragment(System.UInt32,System.UInt32,System.UInt32,System.Byte[])">
+            <summary>
+            Adds a fragment. Returns the fully reassembled payload when this fragment
+            completes the packet, otherwise null.
+            </summary>
+        </member>
+        <member name="T:NetSync.Pipeline.Fragmentation.PacketFragmenter">
+            <summary>
+            Splits large payloads into fragments and back.
+            Fragment wire format: [Fragment:1][seqId:4 BE][index:4 BE][total:4 BE][data]
+            </summary>
+        </member>
+        <member name="F:NetSync.Pipeline.Fragmentation.PacketFragmenter.FragmentSizeUdp">
+            <summary>Safe UDP fragment payload size: fits a typical MTU with headers to spare.</summary>
+        </member>
+        <member name="F:NetSync.Pipeline.Fragmentation.PacketFragmenter.FragmentSizeTcp">
+            <summary>TCP fragment payload size: keeps big transfers from starving small packets.</summary>
+        </member>
+        <member name="F:NetSync.Pipeline.Fragmentation.PacketFragmenter.MaxUnfragmentedSize">
+            <summary>Payloads at or above this size get fragmented.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Fragmentation.PacketFragmenter.WriteFragmentHeader(System.Span{System.Byte},System.UInt32,System.UInt32,System.UInt32)">
+            <summary>Writes the 13-byte fragment header into <paramref name="dest"/> (no allocation).</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Fragmentation.PacketFragmenter.TryUnwrap(System.ReadOnlySpan{System.Byte},System.UInt32@,System.UInt32@,System.UInt32@,System.Byte[]@)">
+            <summary>
+            Returns true when <paramref name="packet"/> is a fragment; outputs its header
+            fields and payload. Payload is a copy (fragments outlive the receive buffer).
+            </summary>
+        </member>
+        <member name="T:NetSync.Pipeline.Reliability.ReliableEndpoint">
+             <summary>
+             Reliability engine for one unreliable datagram link (ENet-style ARQ).
+             One instance per UDP link; transport-agnostic — it only needs a send delegate.
+            
+             Per channel, depending on <see cref="T:NetSync.ReliabilityMode"/>:
+             - sequence numbers (16-bit, wrap-aware) with a 256-packet send window,
+             - immediate ACKs carrying a 32-packet history bitmask,
+             - RTO-based retransmission with exponential backoff, RTO derived from link RTT,
+             - duplicate elimination and (for ReliableOrdered) reorder buffering,
+             - automatic fragmentation of payloads above <see cref="F:NetSync.Pipeline.Reliability.ReliableEndpoint.FragmentThreshold"/>.
+            
+             Threading: HandleRelData/HandleAck are called from the transport receive thread
+             (one per link); Send* may be called from any thread; the retransmit loop runs on
+             its own task. Sender state is guarded by a per-channel lock, receiver state is
+             only touched by the receive thread.
+             </summary>
+        </member>
+        <member name="F:NetSync.Pipeline.Reliability.ReliableEndpoint.FragmentThreshold">
+            <summary>Payloads above this size are split into reliable fragments (fits UDP MTU with headers).</summary>
+        </member>
+        <member name="F:NetSync.Pipeline.Reliability.ReliableEndpoint.SenderState.LowestUnacked">
+            <summary>Oldest unacked seq; equals NextSeq when nothing is pending.
+            The send window is a RANGE gate: NextSeq may never run more than
+            WindowSize ahead of this, otherwise the receiver's dedup ring (also
+            WindowSize) could not distinguish new packets from ancient ones.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Reliability.ReliableEndpoint.HandleRelData(System.Byte[],System.Int32,System.Int32)">
+            <summary>Handles an incoming MsgRelData. Buffer valid only during the call.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Reliability.ReliableEndpoint.BuildAckMask(NetSync.Pipeline.Reliability.ReliableEndpoint.ReceiverState,System.UInt16)">
+            <summary>Bit i set = seq (anchor - 1 - i) has been received.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Reliability.ReliableEndpoint.HandleAck(System.Byte[],System.Int32,System.Int32)">
+            <summary>Handles an incoming MsgRelAck. Buffer valid only during the call.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Reliability.ReliableEndpoint.AdvanceLowestUnacked(NetSync.Pipeline.Reliability.ReliableEndpoint.SenderState)">
+            <summary>Recomputes LowestUnacked after acks. Returns true when it advanced. Caller holds the lock.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Reliability.ReliableEndpoint.SeqDistance(System.UInt16,System.UInt16)">
+            <summary>Wrap-aware distance: positive when <paramref name="a"/> is newer than <paramref name="b"/>.</summary>
+        </member>
+        <member name="T:NetSync.Pipeline.Security.ConnectionCrypto">
+             <summary>
+             Per-connection symmetric cipher: AES-256-CBC with HMAC-SHA256, encrypt-then-MAC.
+             Deliberately the same construction on every target framework so a
+             netstandard2.1 (Unity) peer talks to a net8.0 peer over the wire
+             (AesGcm is unavailable on netstandard2.1).
+            
+             Message layout: [iv:16][mac:32][ciphertext:n×16], MAC over iv‖ciphertext.
+             </summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Security.ConnectionCrypto.FromSecret(System.Byte[])">
+            <summary>Derives independent encryption and MAC keys from a session secret.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Security.ConnectionCrypto.FromPresharedKey(System.Byte[],System.Int64)">
+            <summary>
+            PSK mode: session secret = HMAC(psk, label ‖ sessionToken). The token is
+            public, the PSK is not — an eavesdropper cannot derive the session keys.
+            </summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Security.ConnectionCrypto.Decrypt(System.ReadOnlySpan{System.Byte})">
+            <summary>Returns null when the message is malformed or fails authentication.</summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Security.ConnectionCrypto.ComputeMac(System.Byte[],System.Int32)">
+            <summary>MAC over iv ‖ ciphertext of a [iv][mac][ciphertext] message.</summary>
+        </member>
+        <member name="T:NetSync.Pipeline.Security.EcdhKeyExchange">
+            <summary>
+            Ephemeral ECDH (NIST P-256) helpers. Public keys travel as raw 64-byte X‖Y
+            points — no ASN.1, works on both target frameworks.
+            The exchange is unauthenticated: it defeats passive eavesdropping, not an
+            active MITM (documented in <see cref="F:NetSync.KeyExchangeMode.Ecdh"/>).
+            </summary>
+        </member>
+        <member name="M:NetSync.Pipeline.Security.EcdhKeyExchange.DeriveSessionSecret(System.Security.Cryptography.ECDiffieHellman,System.ReadOnlySpan{System.Byte},System.Int64)">
+            <summary>Derives the session secret from our keypair, their public key and the session token.</summary>
+        </member>
+        <member name="T:NetSync.ReliabilityMode">
+            <summary>
+            Delivery guarantees for a channel. Only meaningful on UDP: TCP channels are
+            inherently reliable-ordered and ignore this setting.
+            </summary>
+        </member>
+        <member name="F:NetSync.ReliabilityMode.Unreliable">
+            <summary>Fire-and-forget datagrams. Lowest latency, no guarantees.</summary>
+        </member>
+        <member name="F:NetSync.ReliabilityMode.UnreliableSequenced">
+            <summary>
+            No retransmission, but stale packets are dropped: a packet older than the
+            newest already delivered is discarded. Ideal for state snapshots (positions)
+            where only the latest value matters.
+            </summary>
+        </member>
+        <member name="F:NetSync.ReliabilityMode.Reliable">
+            <summary>
+            Every packet arrives exactly once (ACK + retransmission), but order is not
+            guaranteed. Large payloads are fragmented automatically.
+            </summary>
+        </member>
+        <member name="F:NetSync.ReliabilityMode.ReliableOrdered">
+            <summary>
+            Every packet arrives exactly once and in send order. Large payloads are
+            fragmented automatically. TCP semantics over UDP.
+            </summary>
+        </member>
+        <member name="F:NetSync.Sending.SendPriority.Critical">
+            <summary>Keepalive/control traffic. Always jumps the queue.</summary>
+        </member>
+        <member name="F:NetSync.Sending.SendPriority.Low">
+            <summary>Bulk transfers (file fragments) — never starve real-time traffic.</summary>
+        </member>
+        <member name="T:NetSync.Sending.SendQueue">
+             <summary>
+             Priority send queue with a dedicated drain loop.
+            
+             Blocks on a counting semaphore and wakes exactly when work arrives (the 1.x
+             version polled with Task.Delay(1): ~1 ms extra latency plus constant CPU wakeups).
+            
+             Jobs are structs carrying (buffer, length); buffers rented from ArrayPool are
+             returned after the write, so a steady send workload allocates nothing here.
+             </summary>
+        </member>
+        <member name="M:NetSync.Sending.SendQueue.TryEnqueue(System.Byte[],System.Int32,System.Boolean,NetSync.Sending.SendPriority)">
+            <summary>
+            Returns false when the queue is full (caller decides how to react and owns
+            the buffer in that case). On success the queue takes ownership: pooled
+            buffers are returned to the pool after the write.
+            </summary>
+        </member>
+        <member name="T:NetSync.Serialization.NetReader">
+            <summary>
+            Counterpart of <see cref="T:NetSync.Serialization.NetWriter"/>: reads primitives from a received payload.
+            Throws <see cref="T:System.IO.EndOfStreamException"/> on malformed/truncated input — always
+            wrap parsing of untrusted data in a try/catch.
+            </summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetReader.ReadBytesMemory">
+            <summary>Zero-copy variant: a slice of the underlying payload.</summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetReader.ReadRaw(System.Int32)">
+            <summary>Raw bytes without a length prefix.</summary>
+        </member>
+        <member name="T:NetSync.Serialization.NetWriter">
+            <summary>
+            Compact binary writer for building message payloads — the replacement for the
+            1.x string-based JsonMessage. Little-endian fixed-width primitives, LEB128
+            var-ints, length-prefixed UTF-8 strings. Reusable: call <see cref="M:NetSync.Serialization.NetWriter.Reset"/>
+            and write the next message into the same buffer.
+            </summary>
+        </member>
+        <member name="P:NetSync.Serialization.NetWriter.WrittenMemory">
+            <summary>The written bytes; valid until the next write or Reset.</summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetWriter.WriteVarUInt(System.UInt32)">
+            <summary>LEB128: small values take 1 byte instead of 4.</summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetWriter.WriteVarInt(System.Int32)">
+            <summary>ZigZag + LEB128: small magnitudes (positive or negative) take 1 byte.</summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetWriter.WriteString(System.String)">
+            <summary>UTF-8, var-int length prefix. Null is written as empty.</summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetWriter.WriteBytes(System.ReadOnlySpan{System.Byte})">
+            <summary>Var-int length prefix + raw bytes.</summary>
+        </member>
+        <member name="M:NetSync.Serialization.NetWriter.WriteRaw(System.ReadOnlySpan{System.Byte})">
+            <summary>Raw bytes, no length prefix — the reader must know the size.</summary>
+        </member>
+        <member name="T:NetSync.Transports.DisconnectReason">
+            <summary>
+            Why a connection ended. Replaces the old OnDisconnected/OnServerDisconnected event
+            pair: subscribers get a single event with an explicit reason.
+            </summary>
+        </member>
+        <member name="F:NetSync.Transports.DisconnectReason.Local">
+            <summary>Local side called Disconnect() or disposed the transport.</summary>
+        </member>
+        <member name="F:NetSync.Transports.DisconnectReason.Remote">
+            <summary>Remote side closed the connection.</summary>
+        </member>
+        <member name="F:NetSync.Transports.DisconnectReason.Timeout">
+            <summary>No pong received within the configured timeout.</summary>
+        </member>
+        <member name="F:NetSync.Transports.DisconnectReason.Error">
+            <summary>An unrecoverable transport error occurred.</summary>
+        </member>
+        <member name="T:NetSync.Transports.IServerTransport">
+            <summary>
+            Server-side transport: listens on a port and manages many peers.
+            Events are raised on background network threads (see <see cref="T:NetSync.Transports.ITransport"/> notes).
+            </summary>
+        </member>
+        <member name="P:NetSync.Transports.IServerTransport.Port">
+            <summary>Actual bound port (useful when started with port 0), 0 when stopped.</summary>
+        </member>
+        <member name="M:NetSync.Transports.IServerTransport.StartAsync(System.Int32,System.Threading.CancellationToken)">
+            <summary>Starts listening. Pass port 0 to let the OS pick one. Returns the bound port.</summary>
+        </member>
+        <member name="M:NetSync.Transports.IServerTransport.SendAsync(NetSync.Transports.TransportPeer,System.ReadOnlyMemory{System.Byte},System.ReadOnlyMemory{System.Byte},System.Threading.CancellationToken)">
+            <summary>Scatter-gather variant, see <see cref="T:NetSync.Transports.ITransport"/> notes.</summary>
+        </member>
+        <member name="T:NetSync.Transports.ITransport">
+             <summary>
+             Client-side transport: a single link to a remote server.
+            
+             Threading contract: all events are raised on background network threads.
+             Never block inside a handler; hand data off to your own queue if you need
+             main-thread delivery (the Unity adapter does exactly that).
+            
+             Lifetime contract: a transport instance is reusable — after Disconnect()
+             completes it may be connected again with ConnectAsync().
+             </summary>
+        </member>
+        <member name="P:NetSync.Transports.ITransport.PingMs">
+            <summary>Last measured round-trip time in milliseconds, -1 when unknown.</summary>
+        </member>
+        <member name="M:NetSync.Transports.ITransport.SendAsync(System.ReadOnlyMemory{System.Byte},System.Threading.CancellationToken)">
+            <summary>
+            Queues data for sending. Returns once the payload is accepted by the send
+            queue (not once it hits the wire). Throws if the transport is not connected
+            or the queue is full (backpressure).
+            </summary>
+        </member>
+        <member name="M:NetSync.Transports.ITransport.SendAsync(System.ReadOnlyMemory{System.Byte},System.ReadOnlyMemory{System.Byte},System.Threading.CancellationToken)">
+            <summary>
+            Scatter-gather variant: sends prefix immediately followed by payload as one
+            packet, without requiring the caller to concatenate them. Lets upper layers
+            prepend their headers with zero intermediate allocations.
+            </summary>
+        </member>
+        <member name="T:NetSync.Transports.PacketProtocol">
+             <summary>
+             Wire format helpers.
+             UDP datagram: [type:1][payload]
+             TCP frame:    [type:1][length:4 BE][payload]   (Ping/Pong: [type:1][timestamp:8 BE])
+            
+             Frame builders write into <see cref="T:System.Buffers.ArrayPool`1"/> buffers: the hot send path
+             allocates nothing. Every Rent* result must go back via <see cref="M:NetSync.Transports.PacketProtocol.Return(System.Byte[])"/>.
+             Rented arrays are usually longer than requested — always pair them with the
+             out length, never use buffer.Length.
+             </summary>
+        </member>
+        <member name="M:NetSync.Transports.PacketProtocol.RentUdpDataPacket(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{System.Byte},System.Int32@)">
+            <summary>UDP: [Data][prefix][payload] in one rented buffer.</summary>
+        </member>
+        <member name="M:NetSync.Transports.PacketProtocol.RentTcpDataFrame(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{System.Byte},System.Int32@)">
+            <summary>TCP: [Data][length][prefix][payload] in one rented buffer.</summary>
+        </member>
+        <member name="M:NetSync.Transports.PacketProtocol.RentTcpFragmentFrame(System.UInt32,System.UInt32,System.UInt32,System.ReadOnlySpan{System.Byte},System.Int32@)">
+            <summary>
+            TCP frame whose body is a fragment: [Data][length][Fragment][seq][idx][total][chunk].
+            </summary>
+        </member>
+        <member name="T:NetSync.Transports.Tcp.TcpServerTransport">
+            <summary>
+            Server-side TCP transport: accepts clients, frames packets, pings peers and
+            drops the ones that stop answering. Send/receive paths use pooled buffers.
+            </summary>
+        </member>
+        <member name="F:NetSync.Transports.Tcp.TcpServerTransport.PooledReceive">
+            <summary>Zero-copy delivery hook, see <see cref="F:NetSync.Transports.Tcp.TcpTransport.PooledReceive"/>.</summary>
+        </member>
+        <member name="T:NetSync.Transports.Tcp.TcpTransport">
+             <summary>
+             Client-side TCP transport. Frames packets, keeps the link alive with ping/pong,
+             fragments large payloads so bulk data never blocks small real-time packets.
+            
+             Hot paths are allocation-free: frames are built in ArrayPool buffers, queued as
+             structs and returned to the pool after the socket write; receive uses pooled
+             buffers plus a single exact-size copy for delivery.
+            
+             Reusable: each ConnectAsync builds a fresh connection state.
+             </summary>
+        </member>
+        <member name="F:NetSync.Transports.Tcp.TcpTransport.PooledReceive">
+            <summary>
+            Zero-copy delivery hook for the peer layer: receives the pooled buffer,
+            valid ONLY for the duration of the call. When set, <see cref="E:NetSync.Transports.Tcp.TcpTransport.DataReceived"/>
+            is not raised and no per-packet array is allocated by the transport.
+            </summary>
+        </member>
+        <member name="M:NetSync.Transports.Tcp.TcpTransport.#ctor(System.Int32,System.Int32,NetSync.Diagnostics.INetLogger)">
+            <param name="pingIntervalMs">How often to ping the server.</param>
+            <param name="pingTimeoutMs">Disconnect when no pong arrives for this long; 0 disables the check.</param>
+            <param name="logger">Optional logger; defaults to <see cref="T:NetSync.Diagnostics.NullNetLogger"/>.</param>
+        </member>
+        <member name="T:NetSync.Transports.TransportPeer">
+            <summary>
+            A remote peer as seen by a server transport. Replaces the old TransportClient:
+            no untyped 'object Client' — transport-specific state stays inside the transport.
+            </summary>
+        </member>
+        <member name="P:NetSync.Transports.TransportPeer.Id">
+            <summary>Process-unique peer id.</summary>
+        </member>
+        <member name="P:NetSync.Transports.TransportPeer.PingMs">
+            <summary>Last measured round-trip time in milliseconds, -1 when unknown.</summary>
+        </member>
+        <member name="P:NetSync.Transports.TransportPeer.TransportState">
+            <summary>Transport-specific state (e.g. the TcpClient). Internal on purpose.</summary>
+        </member>
+        <member name="P:NetSync.Transports.TransportPeer.PeerLayerState">
+            <summary>Set by the peer layer once the handshake binds this link to a NetConnection.</summary>
+        </member>
+        <member name="T:NetSync.Transports.Udp.UdpServerTransport">
+             <summary>
+             Server-side UDP transport. Tracks peers by source endpoint, pings them actively
+             and expires the silent ones.
+            
+             Fixes over 1.x: the server now *sends* pings (before, a peer's LastPongTime was
+             set once at creation and never updated, so with a timeout configured every UDP
+             client would eventually be dropped as dead); liveness uses any received packet.
+             </summary>
+        </member>
+        <member name="F:NetSync.Transports.Udp.UdpServerTransport.PooledReceive">
+            <summary>Zero-copy delivery hook, see <see cref="F:NetSync.Transports.Tcp.TcpTransport.PooledReceive"/>.</summary>
+        </member>
+        <member name="T:NetSync.Transports.Udp.UdpTransport">
+             <summary>
+             Client-side UDP transport. Connectionless at the socket level; liveness is
+             tracked via ping/pong. The reliability layer (stage 4) adds retransmission,
+             ordering and fragmentation on top.
+            
+             Payload limit: one datagram, ≤ <see cref="F:NetSync.Transports.Udp.UdpTransport.MaxDatagramPayload"/> bytes.
+             </summary>
+        </member>
+        <member name="F:NetSync.Transports.Udp.UdpTransport.MaxDatagramPayload">
+            <summary>65507 (max UDP payload) minus our 1-byte packet type header.</summary>
+        </member>
+        <member name="F:NetSync.Transports.Udp.UdpTransport.PooledReceive">
+            <summary>Zero-copy delivery hook, see <see cref="F:NetSync.Transports.Tcp.TcpTransport.PooledReceive"/>.</summary>
+        </member>
+    </members>
+</doc>
