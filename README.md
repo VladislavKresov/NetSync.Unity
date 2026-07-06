@@ -1,6 +1,6 @@
 # NetSync for Unity
 
-Unity adapter for [NetSync](../NetSync) — a standalone, zero-dependency networking core (TCP + UDP channels, reliable UDP, optional compression and encryption, LAN discovery).
+Unity adapter for [NetSync](https://github.com/VladislavKresov/NetSync) — a standalone, zero-dependency networking core (TCP + UDP channels, reliable UDP, optional compression and encryption, LAN discovery).
 
 The core lives in its own repository and ships here as a precompiled `netstandard2.1` DLL (`Runtime/Plugins/NetSync.dll`). This package adds what is Unity-specific and nothing more:
 
@@ -19,7 +19,7 @@ Unity **2021.2+** (.NET Standard 2.1 profile).
 Package Manager → *Add package from git URL…*:
 
 ```
-https://github.com/<you>/NetSync.Unity.git
+https://github.com/VladislavKresov/NetSync.Unity.git
 ```
 
 or clone next to your project and *Add package from disk…* → `package.json`.
