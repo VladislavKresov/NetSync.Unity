@@ -1,45 +1,30 @@
 # NetSync for Unity
 
-Unity adapter for [NetSync](https://github.com/VladislavKresov/NetSync) — a standalone, zero-dependency networking core (TCP + UDP channels, reliable UDP, optional compression and encryption, LAN discovery).
+Multiplayer and networking for Unity on top of [NetSync](https://github.com/VladislavKresov/NetSync): add one component, choose Host, Server or Client, and exchange data over TCP and UDP from the main thread.
 
-The core lives in its own repository and ships here as a precompiled `netstandard2.1` DLL (`Runtime/Plugins/NetSync.dll`). This package adds what is Unity-specific and nothing more:
+The package contains the NetSync core as a DLL plus a thin Unity layer: the `NetSyncManager` component, console logging and `Vector`/`Quaternion` serialization.
 
-| Component | Purpose |
-|---|---|
-| `NetSyncManager` | MonoBehaviour facade: pick a role (Host / Server / Client), configure channels in the Inspector, get all events on the main thread |
-| `UnityNetLogger` | Core log output → Unity console |
-| `NetWriterUnityExtensions` | `Vector2` / `Vector3` / `Quaternion` for `NetWriter` / `NetReader` |
+## Why NetSync for Unity
 
-## Requirements
+- **Set up in the Inspector.** Role, channels, security, relay and reconnect are fields on one component.
+- **Main-thread events.** Every `NetSyncManager` event runs in `Update`, so you can call Unity APIs from handlers.
+- **TCP and UDP in one connection.** Each channel picks its transport and delivery mode: reliable chat next to fast position updates and low-priority downloads.
+- **Works on Mono and IL2CPP.** Covered by PlayMode tests on Unity 2021.3 (Mono) and in a Unity 6000.2 IL2CPP Windows player.
+- **No servers to configure for LAN or friends.** LAN discovery finds hosts automatically; a relay connects players by room code with UDP hole punching.
+- **Network features included.** Typed messages, file streaming, pre-shared-key encryption, login approval, shared server clock and a latency and loss simulator.
 
-Unity **2021.2+** (.NET Standard 2.1 profile).
+## Getting started
 
-## Install
+Requires Unity **2021.2 or newer**.
 
-Package Manager → *Add package from git URL…*:
+1. In Package Manager choose *Add package from git URL…* and enter:
 
-```
-https://github.com/VladislavKresov/NetSync.Unity.git
-```
+   ```
+   https://github.com/VladislavKresov/NetSync.Unity.git
+   ```
 
-or clone next to your project and *Add package from disk…* → `package.json`.
-
-## Samples
-
-Package Manager → select **NetSync for Unity** → **Samples** tab → *Import*:
-
-| Sample | Shows |
-|---|---|
-| **Chat** | reliable TCP channel, LAN discovery, server relay/broadcast |
-| **Position Sync** | sequenced UDP state sync (stale snapshots dropped), server-authoritative movement |
-
-Each sample is a single script plus a README with 3-step scene setup — no scene files to untangle.
-
-## Quick start
-
-1. Add **NetSync → NetSync Manager** to a GameObject.
-2. Pick a role. `Host` runs a server and connects a local client to it.
-3. Leave `address` empty and keep **LAN discovery** on — clients find the server automatically (matched by `appId`, defaulting to `Application.productName`).
+2. Add **NetSync → NetSync Manager** to a GameObject and set **Role** to `Host`, or to `Client` in the second instance. With **LAN discovery** on, clients find the host without an address.
+3. Send and receive from your own script:
 
 ```csharp
 using NetSync.Serialization;
@@ -51,8 +36,8 @@ public class PositionSync : MonoBehaviour {
     private readonly NetWriter _writer = new NetWriter();
 
     private void OnEnable() {
-        net.ServerDataReceived += (conn, channel, data) => net.Broadcast(channel, data);
-        net.DataReceived += (channel, data) => {
+        net.ServerMessageReceived += (connection, channel, data) => net.Broadcast(channel, data.ToArray());
+        net.MessageReceived += (channel, data) => {
             if (channel == 1) transform.position = new NetReader(data).ReadVector3();
         };
     }
@@ -61,29 +46,38 @@ public class PositionSync : MonoBehaviour {
         if (!net.IsClient) return;
         _writer.Reset();
         _writer.WriteVector3(transform.position);
-        net.Send(1, _writer.ToArray()); // channel 1: UDP UnreliableSequenced — stale positions are dropped
+        net.Send(1, _writer); // UDP, stale positions are dropped
     }
 }
 ```
 
-Default channel table (edit in the Inspector; **client and server must match**):
+Default channels are below. You can edit them in the Inspector, but client and server must match.
 
-| id | Transport | Reliability | Use for |
+| Channel | Transport | Delivery | Use for |
 |---|---|---|---|
-| 0 | TCP | — (TCP is reliable-ordered) | commands, chat |
-| 1 | UDP | UnreliableSequenced | positions, state snapshots |
-| 2 | UDP | ReliableOrdered | files, large messages |
+| 0 | TCP | reliable, ordered | commands, chat |
+| 1 | UDP | `UnreliableSequenced` | positions, state |
+| 2 | UDP | `ReliableOrdered` | large messages |
 
-Encryption: set **Key Exchange** to `PresharedKey` (same passphrase on both sides) or `Ecdh`, then tick `encryption` on the channels that need it.
+## Samples
 
-## Updating the core DLL
+Import them from Package Manager → **NetSync for Unity** → **Samples**. Each is one script for an empty GameObject; build and run two instances.
 
-```
-powershell -File tools~/update-core.ps1 -CorePath path\to\NetSync
-```
+| Sample | Shows |
+|---|---|
+| Chat | typed messages, LAN discovery |
+| Position Sync | UDP snapshots interpolated on the server clock |
+| Secure Login | encrypted login and server-side approval |
+| Server Browser | LAN server list with players and ping |
+| File Transfer | large files next to real-time traffic |
+| Relay Room | player-hosted rooms by room code |
 
-Builds the core repo and refreshes `Runtime/Plugins/NetSync.dll` + XML docs.
+## Before you ship
 
-## Threading notes
+- **Security:** the default `None` mode is for trusted networks only. Use `PresharedKey`. `Ecdh` and server identity need P-256, which Unity 2021.3 (Mono) and a 6000.2 IL2CPP player don't have, so a Unity client can't join a server that requires `Ecdh`.
+- **Platforms:** Windows is tested. Android and iOS use the same sockets but haven't been tested on devices. WebGL is not supported.
+- **Background:** events arrive only while `Update` runs. Keep **Run In Background** on when testing two instances on one machine.
 
-The core runs its networking on background threads; this package uses the core's *Polled* delivery mode and drains events in `Update()`, so every `NetSyncManager` event fires on the Unity main thread. If you bypass the manager and use `NetClient`/`NetServer` directly, either call `PollEvents()` yourself or switch to `Immediate` mode and marshal to the main thread on your own.
+The full API is on `net.Client` and `net.Server`; see the [core documentation](https://github.com/VladislavKresov/NetSync/blob/main/docs/Home.md). To rebuild the bundled DLL, run `tools~/update-core.ps1 -CorePath ..\NetSync -Ref v2.0.0-rc.3`.
+
+MIT License.

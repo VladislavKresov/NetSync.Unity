@@ -1,69 +1,101 @@
 using System.Collections.Generic;
-using System.Text;
+using NetSync.Messaging;
+using NetSync.Serialization;
 using NetSync.Unity;
 using UnityEngine;
 
 namespace NetSync.Unity.Samples {
+    /// <summary>One line of chat: a typed message, no manual byte handling. A struct costs no allocation per message.</summary>
+    public struct ChatLine : INetMessage {
+        public string Author;
+        public string Text;
+
+        public void Write(NetWriter writer) => writer.WriteString(Author).WriteString(Text);
+
+        public void Read(NetReader reader) {
+            Author = reader.ReadString();
+            Text = reader.ReadString();
+        }
+    }
+
     /// <summary>
-    /// Minimal LAN chat over the reliable TCP channel (0). Setup: empty scene,
-    /// one GameObject with NetSyncManager + this component. Build & run two
-    /// instances: one as Host, one as Client — the client finds the host via
-    /// LAN discovery, no addresses needed.
+    /// LAN chat with typed messages over the reliable TCP channel (0). Setup: empty scene,
+    /// one GameObject with this component. Build and run two instances: one hosts, the other
+    /// joins — the client finds the host via LAN discovery, no addresses needed.
     /// </summary>
     [RequireComponent(typeof(NetSyncManager))]
     public class ChatSample : MonoBehaviour {
         private const byte ChatChannel = 0;
 
         private NetSyncManager _net;
-        private readonly List<string> _messages = new List<string>();
+        private readonly List<string> _lines = new List<string>();
+        private string _name = "Player";
         private string _input = "";
         private Vector2 _scroll;
+        private bool _started;
 
         private void Awake() {
             _net = GetComponent<NetSyncManager>();
-            _net.Connected += () => AddMessage("<connected>");
-            _net.Disconnected += reason => AddMessage($"<disconnected: {reason}>");
-            _net.DataReceived += (channel, data) => {
-                if (channel == ChatChannel) {
-                    AddMessage(Encoding.UTF8.GetString(data));
-                }
-            };
-            // Server relays chat to everyone, including the sender's own client.
-            _net.ServerDataReceived += (connection, channel, data) => {
-                if (channel == ChatChannel) {
-                    _net.Broadcast(ChatChannel, data);
-                }
-            };
+            _net.startAutomatically = false; // the buttons below choose the role
+            _net.Messages = new NetMessageRegistry().Register<ChatLine>(1);
+            _net.messageChannels.Add(ChatChannel);
+
+            _net.Connected += () => AddLine("<connected>");
+            _net.Disconnected += reason => AddLine($"<disconnected: {reason}>");
+            _net.ConnectFailed += error => AddLine($"<could not connect: {error.Message}>");
+            _net.On<ChatLine>(line => AddLine($"{line.Author}: {line.Text}"));
+            // The server relays every line to everyone, the sender included.
+            _net.OnServer<ChatLine>((connection, line) => _net.BroadcastTyped(ChatChannel, line));
         }
 
-        private void AddMessage(string message) {
-            _messages.Add(message);
-            if (_messages.Count > 100) {
-                _messages.RemoveAt(0);
+        private void AddLine(string line) {
+            _lines.Add(line);
+            if (_lines.Count > 100) {
+                _lines.RemoveAt(0);
             }
             _scroll.y = float.MaxValue;
         }
 
-        private void OnGUI() {
-            GUILayout.BeginArea(new Rect(10, 10, 400, 320), GUI.skin.box);
-            string status = _net.IsHost ? "host" : _net.IsServer ? "server" : _net.IsClient ? "client" : "connecting…";
-            GUILayout.Label($"NetSync chat — {status}, ping {_net.Client?.PingMs ?? -1} ms");
+        private void Begin(NetSyncManager.NetRole role) {
+            _net.role = role;
+            _started = true;
+            _net.StartNetwork();
+            AddLine(role == NetSyncManager.NetRole.Host ? "<hosting>" : "<searching for a host on the LAN…>");
+        }
 
-            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(220));
-            foreach (var message in _messages) {
-                GUILayout.Label(message);
+        private void OnGUI() {
+            GUILayout.BeginArea(new Rect(10, 10, 420, 340), GUI.skin.box);
+            if (!_started) {
+                GUILayout.Label("NetSync chat");
+                _name = GUILayout.TextField(_name);
+                if (GUILayout.Button("Host")) {
+                    Begin(NetSyncManager.NetRole.Host);
+                }
+                if (GUILayout.Button("Join (LAN)")) {
+                    Begin(NetSyncManager.NetRole.Client);
+                }
+                GUILayout.EndArea();
+                return;
+            }
+
+            string status = _net.IsHost ? "host" : _net.IsClient ? "client" : "connecting…";
+            GUILayout.Label($"{status}, ping {_net.Client?.PingMs ?? -1} ms");
+
+            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(240));
+            foreach (var line in _lines) {
+                GUILayout.Label(line);
             }
             GUILayout.EndScrollView();
 
             GUILayout.BeginHorizontal();
+            bool enter = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return;
             _input = GUILayout.TextField(_input, GUILayout.ExpandWidth(true));
-            bool send = GUILayout.Button("Send", GUILayout.Width(60)) ||
-                        (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return);
+            bool send = GUILayout.Button("Send", GUILayout.Width(60)) || enter;
             GUILayout.EndHorizontal();
             GUILayout.EndArea();
 
             if (send && !string.IsNullOrWhiteSpace(_input) && _net.IsClient) {
-                _net.Send(ChatChannel, Encoding.UTF8.GetBytes(_input));
+                _net.SendTyped(ChatChannel, new ChatLine { Author = _name, Text = _input });
                 _input = "";
             }
         }
