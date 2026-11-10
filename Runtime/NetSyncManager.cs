@@ -123,7 +123,11 @@ namespace NetSync.Unity {
         public NetServer Server { get; private set; }
         /// <summary>True once every listener (relay room included) is up.</summary>
         public bool IsServer => Server != null && _serverReady;
-        public bool IsClient => Client != null && Client.IsConnected;
+        /// <summary>
+        /// Connected, as this script sees it: changes exactly when <see cref="Connected"/> and
+        /// <see cref="Disconnected"/> are raised on the main thread, never in between frames.
+        /// </summary>
+        public bool IsClient => Client != null && _clientConnected;
         public bool IsHost => IsServer && IsClient;
         public int ServerPort => Server?.Port ?? 0;
 
@@ -215,6 +219,7 @@ namespace NetSync.Unity {
         private LanServerListener _listener;
         private bool _resumeAfterPause;
         private bool _serverReady;
+        private bool _clientConnected;
         private readonly List<Action<NetClientMessenger>> _clientHandlers = new List<Action<NetClientMessenger>>();
         private readonly List<Action<NetServerMessenger>> _serverHandlers = new List<Action<NetServerMessenger>>();
 
@@ -407,8 +412,14 @@ namespace NetSync.Unity {
         private NetClient CreateClient() {
             var client = new NetClient(BuildConfig(forClient: true));
             Client = client;
-            client.Connected += () => Connected?.Invoke();
-            client.Disconnected += reason => Disconnected?.Invoke(reason);
+            client.Connected += () => {
+                _clientConnected = true;
+                Connected?.Invoke();
+            };
+            client.Disconnected += reason => {
+                _clientConnected = false;
+                Disconnected?.Invoke(reason);
+            };
             client.Reconnecting += attempt => Reconnecting?.Invoke(attempt);
             client.ReconnectFailed += () => Debug.LogWarning("[NetSync] Gave up reconnecting");
             client.MessageReceived += OnClientMessage;
@@ -579,6 +590,7 @@ namespace NetSync.Unity {
         }
 
         private void ReleaseClient() {
+            _clientConnected = false;
             ClientMessenger?.Dispose();
             ClientMessenger = null;
             Client?.Dispose();

@@ -2,7 +2,7 @@
 
 Multiplayer and networking for Unity on top of [NetSync](https://github.com/VladislavKresov/NetSync): add one component, choose Host, Server or Client, and exchange data over TCP and UDP from the main thread.
 
-The package contains the NetSync core as a DLL plus a thin Unity layer: the `NetSyncManager` component, console logging and `Vector`/`Quaternion` serialization.
+This package is a thin Unity layer: the `NetSyncManager` component, console logging and `Vector`/`Quaternion` serialization. The core itself is the separate package `com.netsync.core`, which Unity installs along with it.
 
 ## Why NetSync for Unity
 
@@ -17,14 +17,26 @@ The package contains the NetSync core as a DLL plus a thin Unity layer: the `Net
 
 Requires Unity **2021.2 or newer**.
 
-1. In Package Manager choose *Add package from git URL…* and enter:
+1. Tell Unity where the core package lives: add this to `Packages/manifest.json` (next to `"dependencies"`):
+
+   ```json
+   "scopedRegistries": [
+     {
+       "name": "npmjs",
+       "url": "https://registry.npmjs.org",
+       "scopes": ["com.netsync"]
+     }
+   ],
+   ```
+
+2. In Package Manager choose *Add package from git URL…* and enter:
 
    ```
    https://github.com/VladislavKresov/NetSync.Unity.git
    ```
 
-2. Add **NetSync → NetSync Manager** to a GameObject and set **Role** to `Host`, or to `Client` in the second instance. With **LAN discovery** on, clients find the host without an address.
-3. Send and receive from your own script:
+3. Add **NetSync → NetSync Manager** to a GameObject and set **Role** to `Host`, or to `Client` in the second instance. With **LAN discovery** on, clients find the host without an address.
+4. Send and receive from your own script:
 
 ```csharp
 using NetSync.Serialization;
@@ -78,6 +90,6 @@ Import them from Package Manager → **NetSync for Unity** → **Samples**. Each
 - **Platforms:** Windows is tested. Android and iOS use the same sockets but haven't been tested on devices. WebGL is not supported.
 - **Background:** events arrive only while `Update` runs. Keep **Run In Background** on when testing two instances on one machine.
 
-The full API is on `net.Client` and `net.Server`; see the [core documentation](https://github.com/VladislavKresov/NetSync/blob/main/docs/Home.md). To rebuild the bundled DLL, run `tools~/update-core.ps1 -CorePath ..\NetSync -Ref v2.0.0-rc.3`.
+The full API is on `net.Client` and `net.Server`; see the [core documentation](https://github.com/VladislavKresov/NetSync/blob/main/docs/Home.md). To use a newer core than this package asks for, add it to your manifest, e.g. `"com.netsync.core": "2.0.1"`: Unity picks the highest version requested.
 
 MIT License.

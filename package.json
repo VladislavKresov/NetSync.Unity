@@ -1,10 +1,13 @@
 {
   "name": "com.netsync.unity",
-  "version": "2.0.0-rc.3",
+  "version": "2.0.0-rc.4",
   "displayName": "NetSync for Unity",
   "homepage": "https://github.com/VladislavKresov/NetSync.Unity",
-  "description": "Unity adapter for the NetSync networking core: TCP+UDP channels, reliable UDP, pre-shared-key authentication and encryption, connection approval, relay with hole punching, time sync, LAN discovery. The core is a standalone zero-dependency DLL; this package adds MonoBehaviour integration, main-thread events and Vector/Quaternion serialization.",
+  "description": "Unity adapter for the NetSync networking core: MonoBehaviour integration, main-thread events and Vector/Quaternion serialization. The core (com.netsync.core) is installed with it: TCP and UDP channels, reliable UDP, authentication and encryption, relay with hole punching, time sync, LAN discovery.",
   "unity": "2021.2",
+  "dependencies": {
+    "com.netsync.core": "2.0.0-rc.4"
+  },
   "license": "MIT",
   "keywords": [
     "networking",
