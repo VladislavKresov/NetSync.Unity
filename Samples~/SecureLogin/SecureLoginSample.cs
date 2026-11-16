@@ -13,7 +13,7 @@ namespace NetSync.Unity.Samples {
     /// <summary>
     /// A login that is safe on an open network: the server proves its identity (the client pins
     /// its public key), the password travels encrypted as connect data, and the server decides
-    /// who joins. Falls back to a pre-shared key on runtimes without ECDH/ECDSA.
+    /// who joins.
     /// Setup: empty scene, one GameObject with this component.
     /// </summary>
     [RequireComponent(typeof(NetSyncManager))]
@@ -30,7 +30,6 @@ namespace NetSync.Unity.Samples {
         private string _address = "127.0.0.1";
         private string _status = "";
 
-        private bool Signed => NetIdentity.IsSupported;
         private string PublicKeyFile => Path.Combine(Application.temporaryCachePath, "netsync-server.pub");
 
         private void Awake() {
@@ -40,13 +39,7 @@ namespace NetSync.Unity.Samples {
             _net.autoReconnect = false;
             _net.channels.ForEach(channel => channel.encryption = channel.transport == TransportType.Tcp);
 
-            if (Signed) {
-                _net.keyExchange = KeyExchangeMode.Ecdh;
-            }
-            else {
-                _net.keyExchange = KeyExchangeMode.PresharedKey;
-                _net.presharedKeyPassphrase = "shared out of band";
-            }
+            _net.keyExchange = KeyExchangeMode.Ecdh;
 
             _net.ConnectionApprover = Approve;
             _net.ConnectionOpened += connection => _net.Send(connection, 0, Encoding.UTF8.GetBytes($"Welcome, {connection.Tag}!"));
@@ -77,20 +70,18 @@ namespace NetSync.Unity.Samples {
         }
 
         private void StartServer() {
-            if (Signed) {
-                // A real server loads this from a secret store; it must never ship in the client or the scene.
-                _identity = NetIdentity.Generate();
-                _net.ServerIdentity = _identity;
-                File.WriteAllBytes(PublicKeyFile, _identity.PublicKey); // what clients pin
-            }
+            // A real server loads this from a secret store; it must never ship in the client or the scene.
+            _identity = NetIdentity.Generate();
+            _net.ServerIdentity = _identity;
+            File.WriteAllBytes(PublicKeyFile, _identity.PublicKey); // what clients pin
             _net.role = NetSyncManager.NetRole.Server;
             _net.StartNetwork();
-            _status = Signed ? $"Server identity {_identity.Fingerprint}" : "No ECDSA on this runtime: using a pre-shared key";
+            _status = $"Server identity {_identity.Fingerprint}";
         }
 
         private void Login() {
             _status = "Logging in…";
-            if (Signed && File.Exists(PublicKeyFile)) {
+            if (File.Exists(PublicKeyFile)) {
                 _net.trustedServerKeys.Clear();
                 _net.trustedServerKeys.Add(Convert.ToBase64String(File.ReadAllBytes(PublicKeyFile))); // ships with a real client
             }
@@ -102,7 +93,7 @@ namespace NetSync.Unity.Samples {
 
         private void OnGUI() {
             GUILayout.BeginArea(new Rect(10, 10, 420, 280), GUI.skin.box);
-            GUILayout.Label(Signed ? "Mode: ECDH + server identity" : "Mode: pre-shared key");
+            GUILayout.Label("Key exchange + pinned server identity");
             if (!_net.IsServer && !_net.IsClient) {
                 if (GUILayout.Button("Start server")) {
                     StartServer();

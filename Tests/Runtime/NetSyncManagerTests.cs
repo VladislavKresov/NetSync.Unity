@@ -176,11 +176,7 @@ namespace NetSync.Unity.Tests {
         }
 
         [UnityTest]
-        public IEnumerator Ecdh_With_A_Pinned_Identity_Connects_Or_Reports_Unsupported() {
-            if (!NetIdentity.IsSupported) {
-                Debug.Log("[NetSync test] ECDSA P-256 is not available on this runtime");
-                Assert.Ignore("ECDSA P-256 is not available on this runtime");
-            }
+        public IEnumerator Ecdh_With_A_Pinned_Identity_Connects() {
             using var identity = NetIdentity.Generate();
             var server = Create(NetSyncManager.NetRole.Server, m => {
                 m.keyExchange = KeyExchangeMode.Ecdh;

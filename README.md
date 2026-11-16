@@ -11,7 +11,7 @@ This package is a thin Unity layer: the `NetSyncManager` component, console logg
 - **TCP and UDP in one connection.** Each channel picks its transport and delivery mode: reliable chat next to fast position updates and low-priority downloads.
 - **Works on Mono and IL2CPP.** Covered by PlayMode tests on Unity 2021.3 (Mono) and in a Unity 6000.2 IL2CPP Windows player.
 - **No servers to configure for LAN or friends.** LAN discovery finds hosts automatically; a relay connects players by room code with UDP hole punching.
-- **Network features included.** Typed messages, file streaming, pre-shared-key encryption, login approval, shared server clock and a latency and loss simulator.
+- **Network features included.** Typed messages, file streaming, encryption with a pinned server identity, login approval, shared server clock and a latency and loss simulator.
 
 ## Getting started
 
@@ -86,7 +86,7 @@ Import them from Package Manager → **NetSync for Unity** → **Samples**. Each
 
 ## Before you ship
 
-- **Security:** the default `None` mode is for trusted networks only. Use `PresharedKey`. `Ecdh` and server identity need P-256, which Unity 2021.3 (Mono) and a 6000.2 IL2CPP player don't have, so a Unity client can't join a server that requires `Ecdh`.
+- **Security:** the default `None` mode is for trusted networks only. For anything else use `Ecdh` with a server identity pinned in `trustedServerKeys`, plus a login in the connect data. `PresharedKey` keeps outsiders out, but a key shipped inside a client is known to everyone who has the client. All modes work on Mono and IL2CPP.
 - **Platforms:** Windows is tested. Android and iOS use the same sockets but haven't been tested on devices. WebGL is not supported.
 - **Background:** events arrive only while `Update` runs. Keep **Run In Background** on when testing two instances on one machine.
 
